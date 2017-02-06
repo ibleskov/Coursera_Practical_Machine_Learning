@@ -1,0 +1,136 @@
+---
+title: "Prediction of Weight Lifting Excercises"
+author: "Dr. Ivan Bleskov"
+date: "2/5/2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+```{r include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+## Introduction
+### Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible 
+to collect a large amount of data about personal activity. One thing that people
+regularly do is quantify how much of a particular activity they do, but they 
+rarely quantify how well they do it. In this project, our goal is to use data 
+from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. 
+They were asked to perform barbell lifts correctly and incorrectly in 5 
+different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har.
+
+### Data
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+### Goal
+The goal of the work is to predict the manner (20 different test cases) in which
+the exercise is performed. This is the “classe” variable in the training set.
+
+## Data preparation
+### Loading
+Load the needed packages and datasets.
+```{r}
+set.seed(137)
+require(dplyr)
+require(data.table)
+require(caret)
+
+url_tr <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_te <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+tr <- fread(url_tr, na.strings = c("NA", "", "#DIV/0!"))
+te <- fread(url_te, na.strings = c("NA", "", "#DIV/0!"))
+
+dim(tr); dim(te)
+```
+
+### Cleaning
+We keep only those columns (predictors) which (i) contain no NA's and (ii) are 
+related to data from accelerometers on the belt, forearm, arm, and dumbell.
+```{r}
+ll <- lapply(
+    list(tr, te),
+    # The function selects only columns with proper names and without NA's
+    function(df) {
+        df <- df %>% 
+            select( 
+                which( 
+                    # cols without NA's
+                    (colSums(is.na(.)) == 0) &
+                    # cols containing relevant names
+                    (grepl("dumbbell|forearm|_arm|belt", names(.))) ) )
+        return(df) } )
+# In the "cleaned" train dataset we, of course, need an outcome column "classe"
+tr <- cbind("classe" = as.factor(tr[, classe]),
+            ll[[1]])
+# In the "cleaned" test dataset we need only predictors
+te <- ll[[2]]
+# memory emptying
+ll <- NULL
+```
+
+### Splitting
+We split the train dataset into sub-train (```tr_tr```) and validation 
+(```tr_vld```) datasets.
+```{r}
+tt <- createDataPartition(tr$classe, p = .7, list = FALSE)
+tr_tr  <- tr[ tt, ]
+tr_vld <- tr[-tt, ]
+# splitting check
+dim(tr_tr)[1] + dim(tr_vld)[1] == nrow(tr)
+```
+
+Check for predictors with no (near zero) variability which are useless in a
+prediction model constuction:
+```{r}
+unique(nearZeroVar(tr_tr, saveMetrics = TRUE)$`nzv`)
+```
+
+There are no such predictors.
+
+## Train and prediction on a validation set
+We choose the random forest prediction algorithm with 5-fold cross 
+validation. Since this is rather powerful approach, we expect high prediction
+accuracy.
+```{r}
+fit <- train(classe ~ .,
+             data = tr_tr,
+             method = "rf",
+             trControl = trainControl(method = "cv",
+                                      number = 5))
+fit$finalModel
+```
+
+OOB error is small ($< 1\%$).
+The training took quite some time, therefore it's better to save the model for 
+the further use.
+```{r, eval = FALSE}
+save(fit, file = "fit.RData")
+```
+
+We now use the model to predict on the validation set:
+```{r}
+pred_tr <- predict(fit, newdata = tr_vld)
+confusionMatrix(tr_vld$classe, pred_tr)
+```
+
+The accuracy is extremely high ($.998$). Obviously, this model is good enough 
+and we don't need to train other models on the other validation sets.
+
+## Prediction on a test set
+We now use our model to predict the manner of excercise performance on the 
+unknown test set.
+```{r}
+pred_te <- predict(fit, newdata = te)
+```
+
+Here are the predicted manners
+```{r}
+pred_te
+```
